@@ -1,16 +1,35 @@
 {
-  "pluginAlias": "ExampleHomebridgePlugin",
+  "pluginAlias": "Intellifire",
   "pluginType": "platform",
   "singular": true,
+  "customUi": false,
   "schema": {
     "type": "object",
     "properties": {
       "name": {
+        "type": "string",
         "title": "Name",
+        "required": true,
+        "default": "Intellifire"
+      },
+      "username": {
+        "title": "Username",
         "type": "string",
         "required": true,
-        "default": "Example Dynamic Platform"
+        "default": ""
+      },
+      "password": {
+        "title": "Password",
+        "type": "string",
+        "required": true,
+        "default": ""
       }
     }
-  }
+  },
+  "layout": [
+    {"key": "username"},
+    {"key": "password"}
+  ],
+  "form": null,
+  "display": null
 }
