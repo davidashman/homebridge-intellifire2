@@ -11,7 +11,7 @@ export class Fireplace {
 
   private states = {
     on: false,
-    height: 3,
+    height: 2,
   };
 
   constructor(
@@ -43,8 +43,8 @@ export class Fireplace {
     this.fan.getCharacteristic(this.platform.Characteristic.RotationSpeed)
       .setProps({
         minValue: 0,
-        maxValue: 100,
-        minStep: 20,
+        maxValue: 4,
+        minStep: 1,
       })
       .onSet(this.setHeight.bind(this))
       .onGet(this.getHeight.bind(this));
@@ -75,7 +75,7 @@ export class Fireplace {
 
   updateStatus(data) {
     this.states.on = (data.power === '1');
-    this.states.height = data.height * 20;
+    this.states.height = this.states.on ? data.height : 2;
     this.platform.log.info(`Fireplace ${this.accessory.displayName} states set to ${JSON.stringify(this.states)}`);
 
     this.service.getCharacteristic(this.platform.Characteristic.On).updateValue(this.states.on);
@@ -106,7 +106,7 @@ export class Fireplace {
   sendFireplaceUpdate() {
     const params = new URLSearchParams();
     params.append('power', (this.states.on ? '1' : '0'));
-    params.append('height', Math.round(this.states.height / 20).toString());
+    params.append('height', this.states.height.toString());
     this.platform.log.info(`Setting update to fireplace ${this.accessory.displayName} status to ${JSON.stringify(this.states)}: `,
       params.toString());
     this.sendFireplaceCommand(params);
@@ -134,7 +134,7 @@ export class Fireplace {
 
   sendHeightCommand() {
     const params = new URLSearchParams();
-    params.append('height', Math.round(this.states.height / 20).toString());
+    params.append('height', this.states.height.toString());
     this.sendFireplaceCommand(params);
   }
 
