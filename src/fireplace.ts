@@ -2,21 +2,16 @@ import {Service, PlatformAccessory, CharacteristicValue, CharacteristicChange} f
 import { IntellifirePlatform } from './platform.js';
 import {Session} from './session.js';
 
-/**
- * Platform Accessory
- * An instance of this class is created for each accessory your platform registers
- * Each accessory may expose multiple services of different service types.
- */
 export class Fireplace {
-  private service: Service;
-  private sensor: Service;
+  private readonly service: Service;
+  private readonly sensor: Service;
+  private readonly fan: Service;
+  private refreshTimer!: NodeJS.Timeout;
+  private heightTimer!: NodeJS.Timeout;
 
-  /**
-   * These are just used to create a working example
-   * You should implement your own code to track the state of your accessory
-   */
   private states = {
     on: false,
+    height: 3,
   };
 
   constructor(
@@ -33,27 +28,46 @@ export class Fireplace {
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.accessory.context.device.serial);
 
     this.service = this.accessory.getService(this.platform.Service.Switch) || this.accessory.addService(this.platform.Service.Switch);
-    this.service.setCharacteristic(this.platform.Characteristic.Name, accessory.context.device.name);
+    this.service.setCharacteristic(this.platform.Characteristic.Name, 'Power');
     this.service.getCharacteristic(this.platform.Characteristic.On)
-      .onSet(this.setOn.bind(this))                // SET - bind to the `setOn` method below
-      .onGet(this.getOn.bind(this))                // GET - bind to the `getOn` method below
+      .onSet(this.setOn.bind(this))
+      .onGet(this.getOn.bind(this))
       .on('change', this.setSensor.bind(this));
 
     this.sensor = this.accessory.getService(this.platform.Service.ContactSensor) ||
       this.accessory.addService(this.platform.Service.ContactSensor);
     this.sensor.setCharacteristic(this.platform.Characteristic.Name, accessory.context.device.name);
 
+    this.fan = this.accessory.getService(this.platform.Service.Fan) || this.accessory.addService(this.platform.Service.Fan);
+    this.fan.setCharacteristic(this.platform.Characteristic.Name, 'Flame Height');
+    this.fan.getCharacteristic(this.platform.Characteristic.RotationSpeed)
+      .setProps({
+        minValue: 0,
+        maxValue: 100,
+        minStep: 20,
+      })
+      .onSet(this.setHeight.bind(this))
+      .onGet(this.getHeight.bind(this));
+
     this.queryStatus();
-    setInterval(this.queryStatus.bind(this), 60000);
+    this.setRefreshInterval();
+  }
+
+  setRefreshInterval() {
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer);
+    }
+
+    this.refreshTimer = setInterval(this.queryStatus.bind(this), 30000);
   }
 
   queryStatus() {
-    this.platform.log.info(`Querying for status on ${this.accessory.displayName}.`);
+    this.platform.log.debug(`Querying for status on ${this.accessory.displayName}.`);
     this.session.fetch(`https://iftapi.net/a/${this.accessory.context.device.serial}//apppoll`)
       .then((response) => {
-        this.platform.log.info(`Response from Intellifire: ${response.statusText}`);
+        this.platform.log.debug(`Response from Intellifire: ${response.statusText}`);
         response.json().then((data) => {
-          this.platform.log.info(`Status response: ${JSON.stringify(data)}`);
+          this.platform.log.debug(`Status response: ${JSON.stringify(data)}`);
           this.updateStatus(data);
         });
       });
@@ -61,7 +75,12 @@ export class Fireplace {
 
   updateStatus(data) {
     this.states.on = (data.power === '1');
+    this.states.height = data.height * 20;
+    this.platform.log.info(`Fireplace ${this.accessory.displayName} states set to ${JSON.stringify(this.states)}`);
+
     this.service.getCharacteristic(this.platform.Characteristic.On).updateValue(this.states.on);
+    this.fan.getCharacteristic(this.platform.Characteristic.On).updateValue(this.states.on);
+    this.fan.getCharacteristic(this.platform.Characteristic.RotationSpeed).updateValue(this.getHeight());
   }
 
   async setSensor(change : CharacteristicChange) {
@@ -70,11 +89,8 @@ export class Fireplace {
     }
   }
 
-  sendFireplaceCommand(command : string, value : string) {
-    this.platform.log.info(`Setting ${command} on fireplace ${this.accessory.displayName} status to ${value}`);
-    const params = new URLSearchParams();
-    params.append(command, value);
-
+  sendFireplaceCommand(params : URLSearchParams) {
+    this.setRefreshInterval();
     this.session.fetch(`https://iftapi.net/a/${this.accessory.context.device.serial}//apppost`, {
       method: 'POST',
       body: params,
@@ -87,32 +103,53 @@ export class Fireplace {
     });
   }
 
-  /**
-   * Handle "SET" requests from HomeKit
-   * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
-   */
-  async setOn(value : CharacteristicValue) {
+  sendFireplaceUpdate() {
+    const params = new URLSearchParams();
+    params.append('power', (this.states.on ? '1' : '0'));
+    params.append('height', Math.round(this.states.height / 20).toString());
+    this.platform.log.info(`Setting update to fireplace ${this.accessory.displayName} status to ${JSON.stringify(this.states)}: `,
+      params.toString());
+    this.sendFireplaceCommand(params);
+  }
+
+  sendPowerCommand() {
+    const params = new URLSearchParams();
+    params.append('power', (this.states.on ? '1' : '0'));
+    this.sendFireplaceCommand(params);
+  }
+
+  setOn(value : CharacteristicValue) {
     if (value as boolean !== this.states.on) {
       this.states.on = value as boolean;
-      this.sendFireplaceCommand('power', (this.states.on ? '1' : '0'));
+      setImmediate(this.sendPowerCommand.bind(this));
+    }
+
+    this.fan.getCharacteristic(this.platform.Characteristic.On).updateValue(this.states.on);
+    this.fan.getCharacteristic(this.platform.Characteristic.RotationSpeed).updateValue(this.getHeight());
+  }
+
+  getOn():CharacteristicValue {
+    return this.states.on;
+  }
+
+  sendHeightCommand() {
+    const params = new URLSearchParams();
+    params.append('height', Math.round(this.states.height / 20).toString());
+    this.sendFireplaceCommand(params);
+  }
+
+  setHeight(value : CharacteristicValue) {
+    if (value as number !== this.states.height) {
+      this.states.height = value as number;
+      if (this.heightTimer) {
+        clearTimeout(this.heightTimer);
+      }
+      this.heightTimer = setTimeout(this.sendHeightCommand.bind(this), 2000);
     }
   }
 
-  /**
-   * Handle the "GET" requests from HomeKit
-   * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
-   *
-   * GET requests should return as fast as possbile. A long delay here will result in
-   * HomeKit being unresponsive and a bad user experience in general.
-   *
-   * If your device takes time to respond you should update the status of your device
-   * asynchronously instead using the `updateCharacteristic` method instead.
-
-   * @example
-   * this.service.updateCharacteristic(this.platform.Characteristic.On, true)
-   */
-  async getOn(): Promise<CharacteristicValue> {
-    return this.states.on;
+  getHeight(): CharacteristicValue {
+    return this.states.on ? this.states.height : 0;
   }
 
 }
