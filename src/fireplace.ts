@@ -90,6 +90,8 @@ export class Fireplace {
   }
 
   sendFireplaceCommand(params : URLSearchParams) {
+    this.platform.log.info(`Sending update to fireplace ${this.accessory.displayName}: ${JSON.stringify(this.states)}=>`,
+      params.toString());
     this.setRefreshInterval();
     this.session.fetch(`https://iftapi.net/a/${this.accessory.context.device.serial}//apppost`, {
       method: 'POST',
@@ -107,8 +109,6 @@ export class Fireplace {
     const params = new URLSearchParams();
     params.append('power', (this.states.on ? '1' : '0'));
     params.append('height', this.states.height.toString());
-    this.platform.log.info(`Setting update to fireplace ${this.accessory.displayName} status to ${JSON.stringify(this.states)}: `,
-      params.toString());
     this.sendFireplaceCommand(params);
   }
 
@@ -125,7 +125,6 @@ export class Fireplace {
     }
 
     this.fan.getCharacteristic(this.platform.Characteristic.On).updateValue(this.states.on);
-    this.fan.getCharacteristic(this.platform.Characteristic.RotationSpeed).updateValue(this.getHeight());
   }
 
   getOn():CharacteristicValue {
@@ -149,7 +148,7 @@ export class Fireplace {
   }
 
   getHeight(): CharacteristicValue {
-    return this.states.on ? this.states.height : 0;
+    return this.states.height;
   }
 
 }
