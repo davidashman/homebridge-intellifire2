@@ -46,23 +46,15 @@ export class Fireplace {
         maxValue: 4,
         minStep: 1,
       })
-      .onSet(this.setHeight.bind(this))
-      .onGet(this.getHeight.bind(this));
+      .onSet(this.setHeight.bind(this));
 
-    this.queryStatus();
-    this.setRefreshInterval();
+    // get initial status
+    this.poll();
+    this.longPoll();
   }
 
-  setRefreshInterval() {
-    if (this.refreshTimer) {
-      clearInterval(this.refreshTimer);
-    }
-
-    this.refreshTimer = setInterval(this.queryStatus.bind(this), 30000);
-  }
-
-  queryStatus() {
-    this.platform.log.debug(`Querying for status on ${this.accessory.displayName}.`);
+  poll() {
+    this.platform.log.debug(`Poll for status on ${this.accessory.displayName}.`);
     this.session.fetch(`https://iftapi.net/a/${this.accessory.context.device.serial}//apppoll`)
       .then((response) => {
         this.platform.log.debug(`Response from Intellifire: ${response.statusText}`);
@@ -73,14 +65,42 @@ export class Fireplace {
       });
   }
 
+  longPoll(options = {}) {
+    this.platform.log.debug(`Long poll for status on ${this.accessory.displayName}.`);
+    this.session.fetch(`https://iftapi.net/a/${this.accessory.context.device.serial}//applongpoll`, options)
+      .then((response) => {
+        this.platform.log.debug(`Response from Intellifire: ${response.statusText}`);
+        if (response.ok) {
+          response.json().then((data) => {
+            this.platform.log.debug(`Status response: ${JSON.stringify(data)}`);
+            this.updateStatus(data);
+          });
+        } else {
+          this.platform.log.debug('No updates from the server.');
+        }
+        setImmediate(() => {
+          this.longPoll({
+            method: 'GET',
+            headers: {
+              'If-None-Match': response.headers.get('etag'),
+            },
+          });
+        });
+      })
+      .catch((err) => {
+        this.platform.log.info('Failed to successfully get update from server: ', err.message);
+        setImmediate(this.longPoll.bind(this));
+      });
+  }
+
   updateStatus(data) {
     this.states.on = (data.power === '1');
-    this.states.height = this.states.on ? data.height : 2;
+    this.states.height = this.states.on ? data.height : 0;
     this.platform.log.info(`Fireplace ${this.accessory.displayName} states set to ${JSON.stringify(this.states)}`);
 
     this.service.getCharacteristic(this.platform.Characteristic.On).updateValue(this.states.on);
     this.fan.getCharacteristic(this.platform.Characteristic.On).updateValue(this.states.on);
-    this.fan.getCharacteristic(this.platform.Characteristic.RotationSpeed).updateValue(this.getHeight());
+    this.fan.getCharacteristic(this.platform.Characteristic.RotationSpeed).updateValue(this.states.height);
   }
 
   async setSensor(change : CharacteristicChange) {
@@ -89,33 +109,33 @@ export class Fireplace {
     }
   }
 
-  sendFireplaceCommand(params : URLSearchParams) {
+  post(params : URLSearchParams) {
     this.platform.log.info(`Sending update to fireplace ${this.accessory.displayName}: ${JSON.stringify(this.states)}=>`,
       params.toString());
-    this.setRefreshInterval();
     this.session.fetch(`https://iftapi.net/a/${this.accessory.context.device.serial}//apppost`, {
       method: 'POST',
       body: params,
-    }).then((response: Response) => {
-      if (response.ok) {
-        this.platform.log.info(`Fireplace update response: ${response.status}`);
-      } else {
-        this.platform.log.info(`Fireplace ${this.accessory.displayName} power failed to update: ${response.statusText}`);
-      }
-    });
+    })
+      .then((response: Response) => {
+        if (response.ok) {
+          this.platform.log.info(`Fireplace update response: ${response.status}`);
+        } else {
+          this.platform.log.info(`Fireplace ${this.accessory.displayName} failed to update: ${response.statusText}`);
+        }
+      });
   }
 
   sendFireplaceUpdate() {
     const params = new URLSearchParams();
     params.append('power', (this.states.on ? '1' : '0'));
     params.append('height', this.states.height.toString());
-    this.sendFireplaceCommand(params);
+    this.post(params);
   }
 
   sendPowerCommand() {
     const params = new URLSearchParams();
     params.append('power', (this.states.on ? '1' : '0'));
-    this.sendFireplaceCommand(params);
+    this.post(params);
   }
 
   setOn(value : CharacteristicValue) {
@@ -134,7 +154,7 @@ export class Fireplace {
   sendHeightCommand() {
     const params = new URLSearchParams();
     params.append('height', this.states.height.toString());
-    this.sendFireplaceCommand(params);
+    this.post(params);
   }
 
   setHeight(value : CharacteristicValue) {
@@ -145,10 +165,6 @@ export class Fireplace {
       }
       this.heightTimer = setTimeout(this.sendHeightCommand.bind(this), 2000);
     }
-  }
-
-  getHeight(): CharacteristicValue {
-    return this.states.height;
   }
 
 }
