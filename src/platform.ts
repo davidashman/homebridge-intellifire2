@@ -11,7 +11,7 @@ import {
 import {PLATFORM_NAME, PLUGIN_NAME} from './settings.js';
 import {Fireplace} from './fireplace.js';
 import {Session} from './session.js';
-
+import {Locations, Location, Device} from './types.js';
 
 /**
  * HomebridgePlatform
@@ -24,7 +24,7 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
 
   // this is used to track restored cached accessories
   public readonly accessories: PlatformAccessory[] = [];
-  private readonly fireplaces: Fireplace[] = [];
+  private readonly session: Session;
 
   constructor(
     public readonly log: Logger,
@@ -32,20 +32,24 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
     public readonly api: API,
   ) {
     this.log.debug('Finished initializing platform:', this.config.name);
+    this.session = new Session(this);
 
     // When this event is fired it means Homebridge has restored all cached accessories from disk.
     // Dynamic Platform plugins should only register new accessories after this event was fired,
     // in order to ensure they weren't added to homebridge already. This event can also be used
     // to start discovery of new accessories.
     this.api.on('didFinishLaunching', () => {
-      Session.login(this)
-        .then((session) => {
-          this.discoverDevices(session);
-        })
-        .catch((error) => {
-          this.log.error(error.message);
-        });
+      this.login();
     });
+  }
+
+  async login() {
+    this.session.login()
+      .then(this.discoverDevices.bind(this))
+      .catch((error) => {
+        this.log.error(error.message);
+        setTimeout(this.login.bind(this), 600000);
+      });
   }
 
   /**
@@ -64,31 +68,36 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
    * Accessories must only be registered once, previously created accessories
    * must not be registered again to prevent 'duplicate UUID' errors.
    */
-  async discoverDevices(session : Session) {
+  async discoverDevices() {
     this.log.info('Discovering locations...');
-    const locationResponse = await session.fetch('https://iftapi.net/a//enumlocations');
-    const locationData = await locationResponse.json();
-    const location_id = locationData.locations[0].location_id;
+    const locationResponse = await this.session.fetch('https://iftapi.net/a//enumlocations');
+    if (locationResponse.ok) {
+      const locations: Locations = await locationResponse.json();
+      const location_id = locations.locations[0].location_id;
 
-    this.log.info('Discovering fireplaces...');
-    const fireplaceResponse = await session.fetch(`https://iftapi.net/a//enumfireplaces?location_id=${location_id}`);
-    const fireplaceData = await fireplaceResponse.json();
-    this.log.info(`Found ${fireplaceData.fireplaces.length} fireplaces.`);
+      this.log.info('Discovering fireplaces...');
+      const fireplaceResponse = await this.session.fetch(`https://iftapi.net/a//enumfireplaces?location_id=${location_id}`);
+      if (fireplaceResponse.ok) {
+        const location : Location = await fireplaceResponse.json();
+        this.log.info(`Found ${location.fireplaces.length} fireplaces.`);
 
-    fireplaceData.fireplaces.forEach((fireplace) => {
-      const uuid = this.api.hap.uuid.generate(fireplace.serial);
-      const existingAccessory = this.accessories.find(accessory => accessory.UUID === uuid);
-      if (existingAccessory) {
-        this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
-        new Fireplace(this, existingAccessory, session);
-      } else {
-        this.log.info('Adding new accessory:', fireplace.name);
-        const accessory = new this.api.platformAccessory(fireplace.name, uuid);
-        accessory.context.device = fireplace;
-        new Fireplace(this, accessory, session);
-        this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+        location.fireplaces.forEach((device : Device) => {
+          const uuid = this.api.hap.uuid.generate(device.serial);
+          const existingAccessory = this.accessories.find(accessory => accessory.UUID === uuid);
+          if (existingAccessory) {
+            this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
+            existingAccessory.context.device = device;
+            new Fireplace(this, device, existingAccessory, this.session);
+          } else {
+            this.log.info('Adding new accessory:', device.name);
+            const accessory = new this.api.platformAccessory(device.name, uuid);
+            accessory.context.device = device;
+            new Fireplace(this, device, accessory, this.session);
+            this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+          }
+        });
       }
-    });
+    }
   }
 
 }

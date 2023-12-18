@@ -1,12 +1,12 @@
 import {Service, PlatformAccessory, CharacteristicValue, CharacteristicChange} from 'homebridge';
 import { IntellifirePlatform } from './platform.js';
 import {Session} from './session.js';
+import {Device} from './types.js';
 
 export class Fireplace {
   private readonly service: Service;
   private readonly sensor: Service;
   private readonly fan: Service;
-  private refreshTimer!: NodeJS.Timeout;
   private heightTimer!: NodeJS.Timeout;
 
   private states = {
@@ -16,16 +16,18 @@ export class Fireplace {
 
   constructor(
     private readonly platform: IntellifirePlatform,
+    private readonly device: Device,
     private readonly accessory: PlatformAccessory,
     private readonly session: Session,
   ) {
 
+    this.platform.log.info(`Creating fireplace for device: ${JSON.stringify(device)}`);
+
     // set accessory information
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Hearth and Home')
-      .setCharacteristic(this.platform.Characteristic.Model, this.accessory.context.device.brand)
-      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, this.accessory.context.device.firmware_version_string)
-      .setCharacteristic(this.platform.Characteristic.SerialNumber, this.accessory.context.device.serial);
+      .setCharacteristic(this.platform.Characteristic.Model, this.device.brand)
+      .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.serial);
 
     this.service = this.accessory.getService(this.platform.Service.Switch) || this.accessory.addService(this.platform.Service.Switch);
     this.service.setCharacteristic(this.platform.Characteristic.Name, 'Power');
@@ -36,7 +38,7 @@ export class Fireplace {
 
     this.sensor = this.accessory.getService(this.platform.Service.ContactSensor) ||
       this.accessory.addService(this.platform.Service.ContactSensor);
-    this.sensor.setCharacteristic(this.platform.Characteristic.Name, accessory.context.device.name);
+    this.sensor.setCharacteristic(this.platform.Characteristic.Name, this.accessory.displayName);
 
     this.fan = this.accessory.getService(this.platform.Service.Fan) || this.accessory.addService(this.platform.Service.Fan);
     this.fan.setCharacteristic(this.platform.Characteristic.Name, 'Flame Height');
@@ -49,35 +51,33 @@ export class Fireplace {
       .onSet(this.setHeight.bind(this));
 
     // get initial status
-    this.poll();
+    this.getInitialStatus();
     this.longPoll();
   }
 
-  poll() {
-    this.platform.log.debug(`Poll for status on ${this.accessory.displayName}.`);
-    this.session.fetch(`https://iftapi.net/a/${this.accessory.context.device.serial}//apppoll`)
-      .then((response) => {
-        this.platform.log.debug(`Response from Intellifire: ${response.statusText}`);
-        response.json().then((data) => {
-          this.platform.log.debug(`Status response: ${JSON.stringify(data)}`);
-          this.updateStatus(data);
-        });
+  handleResponse(response) {
+    this.platform.log.debug(`Response from Intellifire: ${response.statusText}`);
+    if (response.ok) {
+      response.json().then((data) => {
+        this.platform.log.debug(`Status response: ${JSON.stringify(data)}`);
+        this.updateStatus(data);
       });
+    } else {
+      this.platform.log.debug('No updates from the server.');
+    }
+  }
+
+  getInitialStatus() {
+    this.platform.log.debug(`Poll for status on ${this.accessory.displayName}.`);
+    this.session.fetch(`https://iftapi.net/a/${this.device.serial}//apppoll`)
+      .then(this.handleResponse.bind(this));
   }
 
   longPoll(options = {}) {
     this.platform.log.debug(`Long poll for status on ${this.accessory.displayName}.`);
-    this.session.fetch(`https://iftapi.net/a/${this.accessory.context.device.serial}//applongpoll`, options)
+    this.session.fetch(`https://iftapi.net/a/${this.device.serial}//applongpoll`, options)
       .then((response) => {
-        this.platform.log.debug(`Response from Intellifire: ${response.statusText}`);
-        if (response.ok) {
-          response.json().then((data) => {
-            this.platform.log.debug(`Status response: ${JSON.stringify(data)}`);
-            this.updateStatus(data);
-          });
-        } else {
-          this.platform.log.debug('No updates from the server.');
-        }
+        this.handleResponse(response);
         setImmediate(() => {
           this.longPoll({
             method: 'GET',
@@ -112,7 +112,7 @@ export class Fireplace {
   post(params : URLSearchParams) {
     this.platform.log.info(`Sending update to fireplace ${this.accessory.displayName}: ${JSON.stringify(this.states)}=>`,
       params.toString());
-    this.session.fetch(`https://iftapi.net/a/${this.accessory.context.device.serial}//apppost`, {
+    this.session.fetch(`https://iftapi.net/a/${this.device.serial}//apppost`, {
       method: 'POST',
       body: params,
     })
@@ -123,13 +123,6 @@ export class Fireplace {
           this.platform.log.info(`Fireplace ${this.accessory.displayName} failed to update: ${response.statusText}`);
         }
       });
-  }
-
-  sendFireplaceUpdate() {
-    const params = new URLSearchParams();
-    params.append('power', (this.states.on ? '1' : '0'));
-    params.append('height', this.states.height.toString());
-    this.post(params);
   }
 
   sendPowerCommand() {
