@@ -52,15 +52,15 @@ export class Fireplace {
 
     // get initial status
     this.getInitialStatus();
-    this.longPoll();
+    this.poll();
   }
 
-  handleResponse(response) {
+  handleCloudResponse(response) {
     this.platform.log.debug(`Response from Intellifire: ${response.statusText}`);
     if (response.ok) {
       response.json().then((data) => {
         this.platform.log.debug(`Status response: ${JSON.stringify(data)}`);
-        this.updateStatus(data);
+        this.updateStatus(data.power === '1', Number(data.height));
       });
     } else {
       this.platform.log.debug('No updates from the server.');
@@ -68,34 +68,42 @@ export class Fireplace {
   }
 
   getInitialStatus() {
-    this.platform.log.debug(`Poll for status on ${this.accessory.displayName}.`);
-    this.session.fetch(`https://iftapi.net/a/${this.device.serial}//apppoll`)
-      .then(this.handleResponse.bind(this));
+    if (this.session.connected) {
+      this.platform.log.debug(`Poll for status on ${this.accessory.displayName}.`);
+      this.session.fetch(`https://iftapi.net/a/${this.device.serial}//apppoll`)
+        .then(this.handleCloudResponse.bind(this));
+    } else {
+      // do local status check
+    }
   }
 
-  longPoll(options = {}) {
-    this.platform.log.debug(`Long poll for status on ${this.accessory.displayName}.`);
-    this.session.fetch(`https://iftapi.net/a/${this.device.serial}//applongpoll`, options)
-      .then((response) => {
-        this.handleResponse(response);
-        setImmediate(() => {
-          this.longPoll({
-            method: 'GET',
-            headers: {
-              'If-None-Match': response.headers.get('etag'),
-            },
+  poll(options = {}) {
+    if (this.session.connected) {
+      this.platform.log.debug(`Long poll for status on ${this.accessory.displayName}.`);
+      this.session.fetch(`https://iftapi.net/a/${this.device.serial}//applongpoll`, options)
+        .then((response) => {
+          this.handleCloudResponse(response);
+          setImmediate(() => {
+            this.poll({
+              method: 'GET',
+              headers: {
+                'If-None-Match': response.headers.get('etag'),
+              },
+            });
           });
+        })
+        .catch((err) => {
+          this.platform.log.info('Failed to successfully get update from server: ', err.message);
+          setImmediate(this.poll.bind(this));
         });
-      })
-      .catch((err) => {
-        this.platform.log.info('Failed to successfully get update from server: ', err.message);
-        setImmediate(this.longPoll.bind(this));
-      });
+    } else {
+      // do local poll
+    }
   }
 
-  updateStatus(data) {
-    this.states.on = (data.power === '1');
-    this.states.height = this.states.on ? data.height : 0;
+  updateStatus(power: boolean, height: number) {
+    this.states.on = power;
+    this.states.height = this.states.on ? height : 0;
     this.platform.log.info(`Fireplace ${this.accessory.displayName} states set to ${JSON.stringify(this.states)}`);
 
     this.service.getCharacteristic(this.platform.Characteristic.On).updateValue(this.states.on);

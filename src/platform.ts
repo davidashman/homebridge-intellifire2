@@ -33,23 +33,15 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
   ) {
     this.log.debug('Finished initializing platform:', this.config.name);
     this.session = new Session(this);
+    this.session.on('connected', this.discoverDevices.bind(this));
 
     // When this event is fired it means Homebridge has restored all cached accessories from disk.
     // Dynamic Platform plugins should only register new accessories after this event was fired,
     // in order to ensure they weren't added to homebridge already. This event can also be used
     // to start discovery of new accessories.
     this.api.on('didFinishLaunching', () => {
-      this.login();
+      this.session.login();
     });
-  }
-
-  async login() {
-    this.session.login()
-      .then(this.discoverDevices.bind(this))
-      .catch((error) => {
-        this.log.error(error.message);
-        setTimeout(this.login.bind(this), 600000);
-      });
   }
 
   /**

@@ -1,14 +1,16 @@
 import {IntellifirePlatform} from './platform.js';
 import {fetch, CookieJar} from 'node-fetch-cookies';
+import EventEmitter from 'events';
 
-export class Session {
+export class Session extends EventEmitter {
 
   private readonly cookies = new CookieJar();
-  private valid = false;
+  public connected = false;
 
   constructor(
     private readonly platform : IntellifirePlatform,
   ) {
+    super();
   }
 
   async login() {
@@ -22,24 +24,29 @@ export class Session {
     loginParams.append('username', this.platform.config.username);
     loginParams.append('password', this.platform.config.password);
 
-    const r = await fetch(this.cookies, 'https://iftapi.net/a//login', {
+    this.fetch('https://iftapi.net/a//login', {
       method: 'POST',
       body: loginParams,
-    });
-
-    this.valid = r.ok;
-    this.platform.log.info(`Logged in with response ${r.status}.`);
+    }).then(this.setConnected.bind(this));
   }
 
-  isValid() {
-    return this.valid;
+  ping() {
+    this.fetch('https://iftapi.net/a//enumlocations').then(this.setConnected.bind(this));
+  }
+
+  setConnected(response) {
+    this.connected = response.ok;
+    this.platform.log.info(`Setting connected status to ${this.connected}: ${response.status}`);
+    if (response.ok) {
+      this.emit('connected');
+      setTimeout(this.ping.bind(this), 300000);
+    } else {
+      this.emit('disconnected');
+      setTimeout(this.login.bind(this), 300000);
+    }
   }
 
   async fetch(url : string, options = {}) {
-    if (!this.valid) {
-      throw new Error('Please login before making API calls.');
-    }
-
     this.platform.log.debug(`Fetching from ${url}.`);
     return fetch(this.cookies, url, options);
   }
