@@ -12,6 +12,7 @@ import {PLATFORM_NAME, PLUGIN_NAME} from './settings.js';
 import {Fireplace} from './fireplace.js';
 import {Session} from './session.js';
 import {Locations, Location, Device} from './types.js';
+import {Discovery} from './discovery.js';
 
 /**
  * HomebridgePlatform
@@ -24,7 +25,9 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
 
   // this is used to track restored cached accessories
   public readonly accessories: PlatformAccessory[] = [];
-  private readonly session: Session;
+  private readonly fireplaces: Fireplace[] = [];
+  private readonly session = new Session(this);
+  public readonly discovery = new Discovery(this);
 
   constructor(
     public readonly log: Logger,
@@ -32,7 +35,6 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
     public readonly api: API,
   ) {
     this.log.debug('Finished initializing platform:', this.config.name);
-    this.session = new Session(this);
     this.session.on('connected', this.discoverDevices.bind(this));
 
     // When this event is fired it means Homebridge has restored all cached accessories from disk.
@@ -74,19 +76,21 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
         this.log.info(`Found ${location.fireplaces.length} fireplaces.`);
 
         location.fireplaces.forEach((device : Device) => {
-          const uuid = this.api.hap.uuid.generate(device.serial);
-          const existingAccessory = this.accessories.find(accessory => accessory.UUID === uuid);
-          if (existingAccessory) {
-            this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
-            existingAccessory.context.device = device;
-            new Fireplace(this, device, existingAccessory, this.session);
-          } else {
-            this.log.info('Adding new accessory:', device.name);
-            const accessory = new this.api.platformAccessory(device.name, uuid);
-            accessory.context.device = device;
-            this.accessories.push(accessory);
-            new Fireplace(this, device, accessory, this.session);
-            this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+          const existingFireplace = this.fireplaces.find(fireplace => fireplace.device.serial === device.serial);
+          if (!existingFireplace) {
+            const uuid = this.api.hap.uuid.generate(device.serial);
+            const existingAccessory = this.accessories.find(accessory => accessory.UUID === uuid);
+            if (existingAccessory) {
+              this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
+              existingAccessory.context.device = device;
+              this.fireplaces.push(new Fireplace(this, device, existingAccessory, this.session));
+            } else {
+              this.log.info('Adding new accessory:', device.name);
+              const accessory = new this.api.platformAccessory(device.name, uuid);
+              accessory.context.device = device;
+              this.fireplaces.push(new Fireplace(this, device, accessory, this.session));
+              this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+            }
           }
         });
       }

@@ -1,7 +1,9 @@
 import {Service, PlatformAccessory, CharacteristicValue, CharacteristicChange} from 'homebridge';
-import { IntellifirePlatform } from './platform.js';
+import {IntellifirePlatform} from './platform.js';
 import {Session} from './session.js';
 import {Device} from './types.js';
+import {Buffer} from 'node:buffer';
+import {createHash} from 'node:crypto';
 
 export class Fireplace {
   private readonly service: Service;
@@ -16,7 +18,7 @@ export class Fireplace {
 
   constructor(
     private readonly platform: IntellifirePlatform,
-    private readonly device: Device,
+    public readonly device: Device,
     private readonly accessory: PlatformAccessory,
     private readonly session: Session,
   ) {
@@ -55,11 +57,11 @@ export class Fireplace {
     this.poll();
   }
 
-  handleCloudResponse(response) {
+  handleResponse(response) {
     this.platform.log.debug(`Response from Intellifire: ${response.statusText}`);
     if (response.ok) {
-      response.json().then((data) => {
-        this.platform.log.debug(`Status response: ${JSON.stringify(data)}`);
+      response.json().then(data => {
+        this.platform.log.debug(`Status response: ${JSON.stringify(data)} with headers ${JSON.stringify(response.headers)}`);
         this.updateStatus(data.power === '1', Number(data.height));
       });
     } else {
@@ -71,34 +73,62 @@ export class Fireplace {
     if (this.session.connected) {
       this.platform.log.debug(`Poll for status on ${this.accessory.displayName}.`);
       this.session.fetch(`https://iftapi.net/a/${this.device.serial}//apppoll`)
-        .then(this.handleCloudResponse.bind(this));
+        .then(this.handleResponse.bind(this));
     } else {
       // do local status check
     }
   }
 
-  poll(options = {}) {
+  poll(etag: string | null = null) {
     if (this.session.connected) {
       this.platform.log.debug(`Long poll for status on ${this.accessory.displayName}.`);
+      const options = {
+        method: 'GET',
+      };
+
+      if (etag) {
+        options['If-None-Match'] = etag;
+      }
+
       this.session.fetch(`https://iftapi.net/a/${this.device.serial}//applongpoll`, options)
-        .then((response) => {
-          this.handleCloudResponse(response);
-          setImmediate(() => {
-            this.poll({
-              method: 'GET',
-              headers: {
-                'If-None-Match': response.headers.get('etag'),
-              },
-            });
-          });
+        .then(response => {
+          this.handleResponse(response);
+          etag = response.headers.get('Etag');
+          this.platform.log.debug(`Etag set to ${etag}`);
         })
-        .catch((err) => {
-          this.platform.log.info('Failed to successfully get update from server: ', err.message);
-          setImmediate(this.poll.bind(this));
+        .catch(err => {
+          this.platform.log.info('Failed to poll cloud servers: ', err.message);
+        })
+        .finally(() => {
+          setTimeout(() => {
+            this.poll(etag);
+          });
         });
     } else {
-      // do local poll
+      this.platform.log.debug(`Local poll for status on ${this.accessory.displayName}.`);
+      this.getIpAddress()
+        .then(ip => {
+          fetch(`http://${ip}/poll`).then(this.handleResponse.bind(this));
+        })
+        .catch(err => {
+          this.platform.log.info('Failed to poll local fireplace: ', err.message);
+        })
+        .finally(() => {
+          setTimeout(this.poll.bind(this), 5000);
+        });
     }
+  }
+
+  getIpAddress() {
+    return new Promise(() => {
+      const ip = this.platform.discovery.ip(this.device.serial);
+
+      if (!ip) {
+        throw new Error(`Fireplace ${this.accessory.displayName} is not connected locally.`);
+      }
+
+      return ip;
+    });
   }
 
   updateStatus(power: boolean, height: number) {
@@ -117,26 +147,63 @@ export class Fireplace {
     }
   }
 
-  post(params : URLSearchParams) {
-    this.platform.log.info(`Sending update to fireplace ${this.accessory.displayName}: ${JSON.stringify(this.states)}=>`,
-      params.toString());
-    this.session.fetch(`https://iftapi.net/a/${this.device.serial}//apppost`, {
-      method: 'POST',
-      body: params,
-    })
-      .then((response: Response) => {
-        if (response.ok) {
-          this.platform.log.info(`Fireplace update response: ${response.status}`);
-        } else {
-          this.platform.log.info(`Fireplace ${this.accessory.displayName} failed to update: ${response.statusText}`);
-        }
-      });
+  post(command: string, value: string) {
+    if (this.session.connected) {
+      const params = new URLSearchParams();
+      params.append(command, value);
+      this.platform.log.info(`Sending update to fireplace ${this.accessory.displayName}: ${JSON.stringify(this.states)}=>`,
+        params.toString());
+      this.session.fetch(`https://iftapi.net/a/${this.device.serial}//apppost`, {
+        method: 'POST',
+        body: params,
+      })
+        .then(response => {
+          if (response.ok) {
+            this.platform.log.info(`Fireplace ${this.accessory.displayName} update response: ${response.status}`);
+          } else {
+            this.platform.log.info(`Fireplace ${this.accessory.displayName} failed to update: ${response.statusText}`);
+          }
+        });
+    } else {
+      this.getIpAddress()
+        .then((ip) => {
+          fetch(`http://${ip}/get_challenge`)
+            .then(response => {
+              if (response.ok) {
+                response.text().then(challenge => {
+                  const apiKeyBuffer = Buffer.from(this.device.apikey);
+                  const challengeBuffer = Buffer.from(challenge, 'hex');
+                  const payloadBuffer = Buffer.from(`${command}=${value})`);
+                  const sig = createHash('sha256').update(Buffer.concat([apiKeyBuffer, challengeBuffer, payloadBuffer])).digest();
+                  const resp = createHash('sha256').update(Buffer.concat([apiKeyBuffer, sig])).digest('hex');
+
+                  const params = new URLSearchParams();
+                  params.append("command", command);
+                  params.append("value", value);
+                  params.append("user", this.platform.config.userID);
+                  params.append("response", resp);
+
+                  this.session.fetch(`http://${ip}/post`, {
+                    method: 'POST',
+                    body: params
+                  }).then(response => {
+                    if (response.ok) {
+                      this.platform.log.info(`Fireplace ${this.accessory.displayName} update response: ${response.status}`);
+                    } else {
+                      this.platform.log.info(`Fireplace ${this.accessory.displayName} failed to update: ${response.statusText}`);
+                    }
+                  })
+                });
+              } else {
+                this.platform.log.info(`Fireplace ${this.accessory.displayName} update failed: ${response.statusText}`);
+              }
+            });
+        });
+    }
   }
 
   sendPowerCommand() {
-    const params = new URLSearchParams();
-    params.append('power', (this.states.on ? '1' : '0'));
-    this.post(params);
+    this.post('power', (this.states.on ? '1' : '0'));
   }
 
   setOn(value : CharacteristicValue) {
@@ -153,9 +220,7 @@ export class Fireplace {
   }
 
   sendHeightCommand() {
-    const params = new URLSearchParams();
-    params.append('height', this.states.height.toString());
-    this.post(params);
+    this.post('height', this.states.height.toString());
   }
 
   setHeight(value : CharacteristicValue) {

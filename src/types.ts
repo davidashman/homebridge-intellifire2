@@ -19,3 +19,10 @@ export interface Device {
   readonly apikey: string;
 
 }
+
+export interface DiscoveryInfo {
+
+  readonly ip: string;
+  readonly uuid: string;
+
+}
