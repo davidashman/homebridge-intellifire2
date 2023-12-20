@@ -1,16 +1,23 @@
 import {IntellifirePlatform} from './platform.js';
 import {fetch, CookieJar, Cookie} from 'node-fetch-cookies';
 import EventEmitter from 'events';
+import {clearTimeout} from 'timers';
 
 export class Session extends EventEmitter {
 
   private readonly cookies = new CookieJar();
   public connected = false;
+  private timer!: NodeJS.Timeout;
 
   constructor(
     private readonly platform : IntellifirePlatform,
   ) {
     super();
+    this.platform.api.on('shutdown', () => {
+      if (this.timer) {
+        clearTimeout(this.timer);
+      }
+    })
   }
 
   cookieFor(name: string) {
@@ -46,10 +53,10 @@ export class Session extends EventEmitter {
     this.platform.log.info(`Setting connected status to ${this.connected}: ${response.status}`);
     if (response.ok) {
       this.emit('connected');
-      setTimeout(this.ping.bind(this), 300000);
+      this.timer = setTimeout(this.ping.bind(this), 300000);
     } else {
       this.emit('disconnected');
-      setTimeout(this.login.bind(this), 300000);
+      this.timer = setTimeout(this.login.bind(this), 300000);
     }
   }
 

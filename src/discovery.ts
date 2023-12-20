@@ -13,10 +13,15 @@ export class Discovery {
 
     this.socket = dgram.createSocket('udp4');
     this.socket.on('error', (err) => {
-      this.platform.log.error(`receiver error:\n${err.stack}`);
+      this.platform.log.error(`Receiver error:\n${err.stack}`);
       this.socket.close();
     });
     this.socket.on('message', this.handleDiscoveryPacket.bind(this));
+
+    this.platform.api.on('shutdown', () => {
+      this.platform.log.info("Shutting down discovery.");
+      this.socket.close();
+    });
 
     this.socket.bind(55555, () => {
       this.socket.setBroadcast(true);
@@ -32,13 +37,13 @@ export class Discovery {
       .then((response) => {
         if (response.ok) {
           response.json().then((json) => {
-            this.platform.log.debug(`Tracking fireplace ${json.serial} at ip ${data.ip}`);
+            this.platform.log.debug(`Fireplace ${json.serial} is at ip ${data.ip}`);
             this.ipList.set(json.serial, data.ip);
           })
         }
       })
       .catch((err) => {
-        this.platform.log.info('Failed to poll local fireplace: ', err.message);
+        this.platform.log.info(`Failed to verify fireplace ip ${data.ip}: `, err.message);
       });
   }
 

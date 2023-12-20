@@ -25,8 +25,7 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
 
   // this is used to track restored cached accessories
   public readonly accessories: PlatformAccessory[] = [];
-  private readonly fireplaces: Fireplace[] = [];
-  private readonly session = new Session(this);
+  public readonly session = new Session(this);
   public readonly discovery = new Discovery(this);
 
   constructor(
@@ -55,6 +54,7 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
 
     // add the restored accessory to the accessories cache so we can track if it has already been registered
     this.accessories.push(accessory);
+    new Fireplace(this, accessory);
   }
 
   /**
@@ -76,22 +76,18 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
         this.log.info(`Found ${location.fireplaces.length} fireplaces.`);
 
         location.fireplaces.forEach((device : Device) => {
-          const existingFireplace = this.fireplaces.find(fireplace => fireplace.device.serial === device.serial);
-          if (!existingFireplace) {
-            const uuid = this.api.hap.uuid.generate(device.serial);
-            const existingAccessory = this.accessories.find(accessory => accessory.UUID === uuid);
-            if (existingAccessory) {
-              this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
-              existingAccessory.context.device = device;
-              this.fireplaces.push(new Fireplace(this, device, existingAccessory, this.session));
-            } else {
-              this.log.info('Adding new accessory:', device.name);
-              const accessory = new this.api.platformAccessory(device.name, uuid);
-              accessory.context.device = device;
-              this.accessories.push(accessory);
-              this.fireplaces.push(new Fireplace(this, device, accessory, this.session));
-              this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
-            }
+          const uuid = this.api.hap.uuid.generate(device.serial);
+          const existingAccessory = this.accessories.find(accessory => accessory.UUID === uuid);
+          if (existingAccessory) {
+            // Update the context information for the accessory
+            existingAccessory.context.device = device;
+          } else {
+            this.log.info('Adding new accessory:', device.name);
+            const accessory = new this.api.platformAccessory(device.name, uuid);
+            accessory.context.device = device;
+            this.accessories.push(accessory);
+            new Fireplace(this, accessory);
+            this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
           }
         });
       }

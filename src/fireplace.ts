@@ -4,12 +4,14 @@ import {Session} from './session.js';
 import {Device} from './types.js';
 import {Buffer} from 'node:buffer';
 import {createHash} from 'node:crypto';
+import {clearTimeout} from 'timers';
 
 export class Fireplace {
   private readonly service: Service;
   private readonly sensor: Service;
   private readonly fan: Service;
   private heightTimer!: NodeJS.Timeout;
+  private pollTimer!: NodeJS.Timeout;
 
   private states = {
     on: false,
@@ -18,18 +20,25 @@ export class Fireplace {
 
   constructor(
     private readonly platform: IntellifirePlatform,
-    public readonly device: Device,
     private readonly accessory: PlatformAccessory,
-    private readonly session: Session,
   ) {
 
-    this.platform.log.info(`Creating fireplace for device: ${JSON.stringify(device)}`);
+    this.platform.log.info(`Creating fireplace for device: ${JSON.stringify(this.device())}`);
+
+    this.platform.api.on('shutdown', () => {
+      if (this.pollTimer) {
+        clearTimeout(this.pollTimer);
+      }
+      if (this.heightTimer) {
+        clearTimeout(this.heightTimer);
+      }
+    });
 
     // set accessory information
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Hearth and Home')
-      .setCharacteristic(this.platform.Characteristic.Model, this.device.brand)
-      .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.serial);
+      .setCharacteristic(this.platform.Characteristic.Model, this.device().brand)
+      .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device().serial);
 
     this.service = this.accessory.getService(this.platform.Service.Switch) || this.accessory.addService(this.platform.Service.Switch);
     this.service.setCharacteristic(this.platform.Characteristic.Name, 'Power');
@@ -53,15 +62,22 @@ export class Fireplace {
       .onSet(this.setHeight.bind(this));
 
     // get initial status
-    this.getInitialStatus();
+    if (this.platform.session.connected) {
+      this.platform.session.fetch(`https://iftapi.net/a/${this.device().serial}//apppoll`)
+        .then(this.handleResponse.bind(this));
+    }
+
     this.poll();
   }
 
+  device() {
+    return this.accessory.context.device;
+  }
+
   handleResponse(response) {
-    this.platform.log.debug(`Response from Intellifire: ${response.statusText}`);
     if (response.ok) {
       response.json().then(data => {
-        this.platform.log.debug(`Status response: ${JSON.stringify(data)} with headers ${JSON.stringify(response.headers)}`);
+        this.platform.log.debug(`Status response: ${JSON.stringify(data)}`);
         this.updateStatus(data.power === '1', Number(data.height));
       });
     } else {
@@ -69,18 +85,8 @@ export class Fireplace {
     }
   }
 
-  getInitialStatus() {
-    if (this.session.connected) {
-      this.platform.log.debug(`Poll for status on ${this.accessory.displayName}.`);
-      this.session.fetch(`https://iftapi.net/a/${this.device.serial}//apppoll`)
-        .then(this.handleResponse.bind(this));
-    } else {
-      // do local status check
-    }
-  }
-
   poll(etag: string | null = null) {
-    if (this.session.connected) {
+    if (this.platform.session.connected) {
       this.platform.log.debug(`Long poll for status on ${this.accessory.displayName}.`);
       const options = {
         method: 'GET',
@@ -90,44 +96,44 @@ export class Fireplace {
         options['If-None-Match'] = etag;
       }
 
-      this.session.fetch(`https://iftapi.net/a/${this.device.serial}//applongpoll`, options)
+      this.platform.session.fetch(`https://iftapi.net/a/${this.device().serial}//applongpoll`, options)
         .then(response => {
           this.handleResponse(response);
           etag = response.headers.get('Etag');
           this.platform.log.debug(`Etag set to ${etag}`);
         })
         .catch(err => {
-          this.platform.log.info('Failed to poll cloud servers: ', err.message);
+          this.platform.log.info(err.message);
         })
         .finally(() => {
-          setTimeout(() => {
+          this.pollTimer = setTimeout(() => {
             this.poll(etag);
           });
         });
     } else {
-      this.platform.log.debug(`Local poll for status on ${this.accessory.displayName}.`);
       this.getIpAddress()
         .then(ip => {
+          this.platform.log.debug(`Local poll for status on ${this.accessory.displayName} at ip ${ip}.`);
           fetch(`http://${ip}/poll`).then(this.handleResponse.bind(this));
         })
         .catch(err => {
-          this.platform.log.info('Failed to poll local fireplace: ', err.message);
+          this.platform.log.info(err.message);
         })
         .finally(() => {
-          setTimeout(this.poll.bind(this), 5000);
+          this.pollTimer = setTimeout(this.poll.bind(this), 5000);
         });
     }
   }
 
   getIpAddress() {
-    return new Promise(() => {
-      const ip = this.platform.discovery.ip(this.device.serial);
+    return new Promise((resolve, reject) => {
+      const ip = this.platform.discovery.ip(this.device().serial);
 
-      if (!ip) {
-        throw new Error(`Fireplace ${this.accessory.displayName} is not connected locally.`);
+      if (ip) {
+        resolve(ip);
+      } else {
+        reject(new Error(`No local ip is available for fireplace ${this.accessory.displayName}.`));
       }
-
-      return ip;
     });
   }
 
@@ -148,12 +154,12 @@ export class Fireplace {
   }
 
   post(command: string, value: string) {
-    if (this.session.connected) {
+    if (this.platform.session.connected) {
       const params = new URLSearchParams();
       params.append(command, value);
       this.platform.log.info(`Sending update to fireplace ${this.accessory.displayName}: ${JSON.stringify(this.states)}=>`,
         params.toString());
-      this.session.fetch(`https://iftapi.net/a/${this.device.serial}//apppost`, {
+      this.platform.session.fetch(`https://iftapi.net/a/${this.device().serial}//apppost`, {
         method: 'POST',
         body: params,
       })
@@ -165,40 +171,44 @@ export class Fireplace {
           }
         });
     } else {
-      this.getIpAddress()
-        .then((ip) => {
-          fetch(`http://${ip}/get_challenge`)
-            .then(response => {
-              if (response.ok) {
-                response.text().then(challenge => {
-                  const apiKeyBuffer = Buffer.from(this.device.apikey);
-                  const challengeBuffer = Buffer.from(challenge, 'hex');
-                  const payloadBuffer = Buffer.from(`${command}=${value})`);
-                  const sig = createHash('sha256').update(Buffer.concat([apiKeyBuffer, challengeBuffer, payloadBuffer])).digest();
-                  const resp = createHash('sha256').update(Buffer.concat([apiKeyBuffer, sig])).digest('hex');
+      if (this.device().apikey) {
+        this.getIpAddress()
+          .then((ip) => {
+            fetch(`http://${ip}/get_challenge`)
+              .then(response => {
+                if (response.ok) {
+                  response.text().then(challenge => {
+                    const apiKeyBuffer = Buffer.from(this.device().apikey);
+                    const challengeBuffer = Buffer.from(challenge, 'hex');
+                    const payloadBuffer = Buffer.from(`${command}=${value})`);
+                    const sig = createHash('sha256').update(Buffer.concat([apiKeyBuffer, challengeBuffer, payloadBuffer])).digest();
+                    const resp = createHash('sha256').update(Buffer.concat([apiKeyBuffer, sig])).digest('hex');
 
-                  const params = new URLSearchParams();
-                  params.append("command", command);
-                  params.append("value", value);
-                  params.append("user", this.platform.config.userID);
-                  params.append("response", resp);
+                    const params = new URLSearchParams();
+                    params.append("command", command);
+                    params.append("value", value);
+                    params.append("user", this.platform.config.userID);
+                    params.append("response", resp);
 
-                  this.session.fetch(`http://${ip}/post`, {
-                    method: 'POST',
-                    body: params
-                  }).then(response => {
-                    if (response.ok) {
-                      this.platform.log.info(`Fireplace ${this.accessory.displayName} update response: ${response.status}`);
-                    } else {
-                      this.platform.log.info(`Fireplace ${this.accessory.displayName} failed to update: ${response.statusText}`);
-                    }
-                  })
-                });
-              } else {
-                this.platform.log.info(`Fireplace ${this.accessory.displayName} update failed: ${response.statusText}`);
-              }
-            });
-        });
+                    fetch(`http://${ip}/post`, {
+                      method: 'POST',
+                      body: params
+                    }).then(response => {
+                      if (response.ok) {
+                        this.platform.log.info(`Fireplace ${this.accessory.displayName} update response: ${response.status}`);
+                      } else {
+                        this.platform.log.info(`Fireplace ${this.accessory.displayName} failed to update: ${response.statusText}`);
+                      }
+                    })
+                  });
+                } else {
+                  this.platform.log.info(`Fireplace ${this.accessory.displayName} update failed: ${response.statusText}`);
+                }
+              });
+          });
+      } else {
+        this.platform.log.debug(`No API key available for fireplace ${this.accessory.displayName}.  Can not control locally.`);
+      }
     }
   }
 
