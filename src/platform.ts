@@ -88,6 +88,7 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
               this.log.info('Adding new accessory:', device.name);
               const accessory = new this.api.platformAccessory(device.name, uuid);
               accessory.context.device = device;
+              this.accessories.push(accessory);
               this.fireplaces.push(new Fireplace(this, device, accessory, this.session));
               this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
             }
