@@ -10,9 +10,9 @@ import {
 
 import {PLATFORM_NAME, PLUGIN_NAME} from './settings.js';
 import {Fireplace} from './fireplace.js';
-import {Session} from './session.js';
+import {Cloud} from './cloud.js';
 import {Locations, Location, Device} from './types.js';
-import {Discovery} from './discovery.js';
+import {Local} from './local.js';
 
 /**
  * HomebridgePlatform
@@ -25,8 +25,8 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
 
   // this is used to track restored cached accessories
   public readonly accessories: PlatformAccessory[] = [];
-  public readonly session = new Session(this);
-  public readonly discovery = new Discovery(this);
+  public readonly cloud = new Cloud(this);
+  public readonly local = new Local(this);
 
   constructor(
     public readonly log: Logger,
@@ -34,14 +34,14 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
     public readonly api: API,
   ) {
     this.log.debug('Finished initializing platform:', this.config.name);
-    this.session.on('connected', this.discoverDevices.bind(this));
+    this.cloud.on('connected', this.discoverDevices.bind(this));
 
     // When this event is fired it means Homebridge has restored all cached accessories from disk.
     // Dynamic Platform plugins should only register new accessories after this event was fired,
     // in order to ensure they weren't added to homebridge already. This event can also be used
     // to start discovery of new accessories.
     this.api.on('didFinishLaunching', () => {
-      this.session.login().catch(error => this.log.error(error.message));
+      this.cloud.login().catch(error => this.log.error(error.message));
     });
   }
 
@@ -64,13 +64,13 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
    */
   async discoverDevices() {
     this.log.info('Discovering locations...');
-    const locationResponse = await this.session.fetch('https://iftapi.net/a//enumlocations');
+    const locationResponse = await this.cloud.fetch(null, 'enumlocations');
     if (locationResponse.ok) {
       const locations: Locations = await locationResponse.json();
       const location_id = locations.locations[0].location_id;
 
       this.log.info('Discovering fireplaces...');
-      const fireplaceResponse = await this.session.fetch(`https://iftapi.net/a//enumfireplaces?location_id=${location_id}`);
+      const fireplaceResponse = await this.cloud.fetch(null, `enumfireplaces?location_id=${location_id}`);
       if (fireplaceResponse.ok) {
         const location : Location = await fireplaceResponse.json();
         this.log.info(`Found ${location.fireplaces.length} fireplaces.`);

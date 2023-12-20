@@ -1,8 +1,8 @@
 import {IntellifirePlatform} from './platform.js';
 import * as dgram from 'dgram';
-import {DiscoveryInfo} from './types.js';
+import {Device, DiscoveryInfo} from './types.js';
 
-export class Discovery {
+export class Local {
 
   private readonly socket;
   private ipList = new Map<string, string>();
@@ -51,4 +51,16 @@ export class Discovery {
     return this.ipList.get(serial);
   }
 
+  fetch(device: Device, action: string, options = {}) {
+    const ip = this.platform.local.ip(device.serial);
+    if (ip) {
+      this.platform.log.debug(`Local poll for status on ${device.name} at ip ${ip}.`);
+      return fetch(`http://${ip}/${action}`, options);
+    } else {
+      return new Promise((_resolve: (response: Response) => void, reject: (error: Error) => void) => {
+        reject(new Error("No local IP"));
+      });
+    }
+
+  }
 }

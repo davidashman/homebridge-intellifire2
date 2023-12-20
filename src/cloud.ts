@@ -2,8 +2,9 @@ import {IntellifirePlatform} from './platform.js';
 import {fetch, CookieJar, Cookie} from 'node-fetch-cookies';
 import EventEmitter from 'events';
 import {clearTimeout} from 'timers';
+import {Device} from './types.js';
 
-export class Session extends EventEmitter {
+export class Cloud extends EventEmitter {
 
   private readonly cookies = new CookieJar();
   public connected = false;
@@ -45,7 +46,7 @@ export class Session extends EventEmitter {
   }
 
   ping() {
-    this.fetch('https://iftapi.net/a//enumlocations').then(this.setConnected.bind(this));
+    this.fetch(null, 'enumlocations').then(this.setConnected.bind(this));
   }
 
   setConnected(response) {
@@ -60,7 +61,9 @@ export class Session extends EventEmitter {
     }
   }
 
-  async fetch(url : string, options = {}) {
+  async fetch(device: Device | null, action : string, options = {}) {
+    const serial = device ? device.serial : '';
+    const url = `https://iftapi.net/a/${serial}/${action}`;
     this.platform.log.debug(`Fetching from ${url}.`);
     return fetch(this.cookies, url, options);
   }
