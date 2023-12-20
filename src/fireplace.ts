@@ -59,10 +59,9 @@ export class Fireplace {
       })
       .onSet(this.setHeight.bind(this));
 
-    // get initial status
-    if (this.platform.cloud.connected) {
+    this.platform.cloud.on('connected', () => {
       this.platform.cloud.fetch(this.device(), 'apppoll').then(this.handleResponse.bind(this));
-    }
+    })
 
     this.poll();
   }
