@@ -1,7 +1,5 @@
 import {Service, PlatformAccessory, CharacteristicValue, CharacteristicChange} from 'homebridge';
 import {IntellifirePlatform} from './platform.js';
-import {Buffer} from 'node:buffer';
-import {createHash} from 'node:crypto';
 import {clearTimeout} from 'timers';
 
 export class Fireplace {
@@ -60,8 +58,8 @@ export class Fireplace {
       .onSet(this.setHeight.bind(this));
 
     this.platform.cloud.on('connected', () => {
-      this.platform.cloud.fetch(this.device(), 'apppoll').then(this.handleResponse.bind(this));
-    })
+      this.platform.cloud.status(this.device()).then(this.handleResponse.bind(this));
+    });
 
     this.poll();
   }
@@ -81,36 +79,21 @@ export class Fireplace {
     }
   }
 
-  poll(etag: string | null = null) {
+  poll() {
     if (this.platform.cloud.connected) {
-      this.platform.log.debug(`Long poll for status on ${this.accessory.displayName}.`);
-      const options = {
-        method: 'GET',
-      };
-
-      if (etag) {
-        options['If-None-Match'] = etag;
-      }
-
-      this.platform.cloud.fetch(this.device(), 'applongpoll', options)
-        .then(response => {
-          this.handleResponse(response);
-          etag = response.headers.get('Etag');
-          this.platform.log.debug(`Etag set to ${etag}`);
-        })
+      this.platform.cloud.poll(this.device())
+        .then(this.handleResponse.bind(this))
         .catch(err => {
           this.platform.log.info(err.message);
         })
         .finally(() => {
-          this.pollTimer = setTimeout(() => {
-            this.poll(etag);
-          });
+          this.pollTimer = setTimeout(this.poll.bind(this));
         });
     } else {
-      this.platform.local.fetch(this.device(), 'poll')
+      this.platform.local.poll(this.device())
         .then(this.handleResponse.bind(this))
         .catch(error => {
-          this.platform.log.info(`An error occurred local polling ${this.accessory.displayName}: `, error.message);
+          this.platform.log.info(error.message);
         })
         .finally(() => {
           this.pollTimer = setTimeout(this.poll.bind(this), 5000);
@@ -136,56 +119,9 @@ export class Fireplace {
 
   post(command: string, value: string) {
     if (this.platform.cloud.connected) {
-      const params = new URLSearchParams();
-      params.append(command, value);
-      this.platform.log.info(`Sending update to fireplace ${this.accessory.displayName}: ${JSON.stringify(this.states)}=>`,
-        params.toString());
-      this.platform.cloud.fetch(this.device(), 'apppost', {
-        method: 'POST',
-        body: params,
-      })
-        .then(response => {
-          if (response.ok) {
-            this.platform.log.info(`Fireplace ${this.accessory.displayName} update response: ${response.status}`);
-          } else {
-            this.platform.log.info(`Fireplace ${this.accessory.displayName} failed to update: ${response.statusText}`);
-          }
-        });
+      this.platform.cloud.post(this.device(), command, value);
     } else {
-      this.platform.local.fetch(this.device(), 'get_challenge')
-        .then(response => {
-          if (response.ok) {
-            response.text().then(challenge => {
-              const apiKeyBuffer = Buffer.from(this.device().apikey, 'hex');
-              const challengeBuffer = Buffer.from(challenge, 'hex');
-              const payloadBuffer = Buffer.from(`post:command=${command}&value=${value}`);
-              const sig = createHash('sha256').update(Buffer.concat([apiKeyBuffer, challengeBuffer, payloadBuffer])).digest();
-              const resp = createHash('sha256').update(Buffer.concat([apiKeyBuffer, sig])).digest('hex');
-
-              const params = new URLSearchParams();
-              params.append('command', command);
-              params.append('value', value);
-              params.append('user', this.platform.config.user);
-              params.append('response', resp);
-
-              this.platform.local.fetch(this.device(), 'post', {
-                method: 'POST',
-                body: params,
-              }).then(response => {
-                if (response.ok) {
-                  this.platform.log.info(`Fireplace ${this.accessory.displayName} update response: ${response.status}`);
-                } else {
-                  this.platform.log.info(`Fireplace ${this.accessory.displayName} failed to update: ${response.statusText}`);
-                }
-              });
-            });
-          } else {
-            this.platform.log.info(`Fireplace ${this.accessory.displayName} update failed: ${response.statusText}`);
-          }
-        })
-        .catch(error => {
-          this.platform.log.info(`An error occurred posting update to ${this.accessory.displayName}: `, error.message);
-        });
+      this.platform.local.post(this.device(), command, value);
     }
   }
 

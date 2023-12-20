@@ -9,6 +9,7 @@ export class Cloud extends EventEmitter {
   private readonly cookies = new CookieJar();
   public connected = false;
   private timer!: NodeJS.Timeout;
+  private etags = new Map<string, string>();
 
   constructor(
     private readonly platform : IntellifirePlatform,
@@ -66,6 +67,45 @@ export class Cloud extends EventEmitter {
     const url = `https://iftapi.net/a/${serial}/${action}`;
     this.platform.log.debug(`Fetching from ${url}.`);
     return fetch(this.cookies, url, options);
+  }
+
+  status(device: Device) {
+    return this.fetch(device, 'apppoll');
+  }
+
+  poll(device: Device) {
+    this.platform.log.debug(`Long poll for status on ${device.name}.`);
+    const options = {
+      method: 'GET',
+    };
+
+    if (this.etags.has(device.serial)) {
+      options['headers'] = {'If-None-Match': this.etags.get(device.serial)};
+      this.platform.log.debug(`Etag set to ${this.etags.get(device.serial)}`);
+    }
+
+    return new Promise((resolve, reject) => {
+      this.fetch(device, 'applongpoll', options)
+        .then(response => {
+          this.etags.set(device.serial, response.headers.get('etag'));
+          resolve(response);
+        })
+        .catch(error => {
+          reject(error);
+        });
+    });
+  }
+
+  post(device: Device, command: string, value: string) {
+    const params = new URLSearchParams();
+    params.append(command, value);
+    this.platform.log.info(`Sending update to fireplace ${device.name}:`, params.toString());
+    this.fetch(device, 'apppost', {
+      method: 'POST',
+      body: params,
+    }).then(response => {
+      this.platform.log.info(`Fireplace ${device.name} update response: ${response.status} ${response.statusText}`);
+    });
   }
 
 }

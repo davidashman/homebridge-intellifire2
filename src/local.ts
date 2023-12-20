@@ -1,6 +1,8 @@
 import {IntellifirePlatform} from './platform.js';
 import * as dgram from 'dgram';
 import {Device, DiscoveryInfo} from './types.js';
+import {Buffer} from 'node:buffer';
+import {createHash} from 'node:crypto';
 
 export class Local {
 
@@ -61,9 +63,42 @@ export class Local {
       return fetch(`http://${ip}/${action}`, options);
     } else {
       return new Promise((_resolve: (response: Response) => void, reject: (error: Error) => void) => {
-        reject(new Error("No local IP"));
+        reject(new Error('No local IP'));
       });
     }
+  }
 
+  poll(device: Device) {
+    return this.fetch(device, 'poll');
+  }
+
+  post(device: Device, command: string, value: string) {
+    this.fetch(device, 'get_challenge')
+      .then(response => {
+        if (response.ok) {
+          response.text().then(challenge => {
+            const apiKeyBuffer = Buffer.from(device.apikey, 'hex');
+            const challengeBuffer = Buffer.from(challenge, 'hex');
+            const payloadBuffer = Buffer.from(`post:command=${command}&value=${value}`);
+            const sig = createHash('sha256').update(Buffer.concat([apiKeyBuffer, challengeBuffer, payloadBuffer])).digest();
+            const resp = createHash('sha256').update(Buffer.concat([apiKeyBuffer, sig])).digest('hex');
+
+            const params = new URLSearchParams();
+            params.append('command', command);
+            params.append('value', value);
+            params.append('user', this.platform.config.user);
+            params.append('response', resp);
+
+            this.fetch(device, 'post', {
+              method: 'POST',
+              body: params,
+            }).then(response => {
+              this.platform.log.info(`Fireplace ${device.name} update response: ${response.statusText}`);
+            });
+          });
+        } else {
+          this.platform.log.info(`Fireplace ${device.name} challenge response: ${response.statusText}`);
+        }
+      });
   }
 }
