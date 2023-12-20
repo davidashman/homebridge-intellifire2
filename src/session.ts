@@ -1,5 +1,5 @@
 import {IntellifirePlatform} from './platform.js';
-import {fetch, CookieJar} from 'node-fetch-cookies';
+import {fetch, CookieJar, Cookie} from 'node-fetch-cookies';
 import EventEmitter from 'events';
 
 export class Session extends EventEmitter {
@@ -13,21 +13,28 @@ export class Session extends EventEmitter {
     super();
   }
 
+  cookieFor(name: string) {
+    return Cookie.fromObject({
+      name: name,
+      value: this.platform.config[name],
+      path: "/",
+      domain: "iftapi.net",
+      subdomains: false,
+      secure: false,
+      expiry: null
+    });
+  }
+
   async login() {
-    if (!this.platform.config.password) {
+    if (!this.platform.config.user) {
       throw new Error('Please configure this plugin before using.');
     }
 
     this.platform.log.info('Logging into Intellifire...');
-
-    const loginParams = new URLSearchParams();
-    loginParams.append('username', this.platform.config.username);
-    loginParams.append('password', this.platform.config.password);
-
-    this.fetch('https://iftapi.net/a//login', {
-      method: 'POST',
-      body: loginParams,
-    }).then(this.setConnected.bind(this));
+    this.cookies.addCookie(this.cookieFor('user'));
+    this.cookies.addCookie(this.cookieFor('auth_cookie'));
+    this.cookies.addCookie(this.cookieFor('web_client_id'));
+    this.ping();
   }
 
   ping() {

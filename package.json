@@ -27,6 +27,7 @@
     "homebridge-plugin"
   ],
   "dependencies": {
+    "@homebridge/plugin-ui-utils": "^1.0.0",
     "node-fetch-cookies": "^2.1.1"
   },
   "devDependencies": {

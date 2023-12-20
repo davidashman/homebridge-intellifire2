@@ -42,7 +42,7 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
     // in order to ensure they weren't added to homebridge already. This event can also be used
     // to start discovery of new accessories.
     this.api.on('didFinishLaunching', () => {
-      this.session.login();
+      this.session.login().catch(error => this.log.error(error.message));
     });
   }
 
