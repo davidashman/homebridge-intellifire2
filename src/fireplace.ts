@@ -79,26 +79,23 @@ export class Fireplace {
     }
   }
 
+  api() {
+    return this.platform.cloud.connected ? this.platform.cloud : this.platform.local;
+  }
+
+  connected() {
+    return this.platform.cloud.connected;
+  }
+
   poll() {
-    if (this.platform.cloud.connected) {
-      this.platform.cloud.poll(this.device())
-        .then(this.handleResponse.bind(this))
-        .catch(err => {
-          this.platform.log.info(err.message);
-        })
-        .finally(() => {
-          this.pollTimer = setTimeout(this.poll.bind(this));
-        });
-    } else {
-      this.platform.local.poll(this.device())
-        .then(this.handleResponse.bind(this))
-        .catch(error => {
-          this.platform.log.info(error.message);
-        })
-        .finally(() => {
-          this.pollTimer = setTimeout(this.poll.bind(this), 5000);
-        });
-    }
+    this.api().poll(this.device())
+      .then(this.handleResponse.bind(this))
+      .catch(err => {
+        this.platform.log.info(err.message);
+      })
+      .finally(() => {
+        this.pollTimer = setTimeout(this.poll.bind(this), this.connected() ? 0 : 5000);
+      });
   }
 
   updateStatus(power: boolean, height: number) {
@@ -118,11 +115,7 @@ export class Fireplace {
   }
 
   post(command: string, value: string) {
-    if (this.platform.cloud.connected) {
-      this.platform.cloud.post(this.device(), command, value);
-    } else {
-      this.platform.local.post(this.device(), command, value);
-    }
+    this.api().post(this.device(), command, value);
   }
 
   sendPowerCommand() {
