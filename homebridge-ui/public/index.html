@@ -1,0 +1,49 @@
+<div class="card card-body">
+    <div id="options" class="card-body my-3 w-75 mx-auto">
+        <form id='authForm' class="form-horizontal">
+
+            <div id="codeDiv" class="card-body my-3 w-75 mx-auto">
+                <div class="mb-3">
+                    <label class="form-label" for="username">Username</label>
+                    <input class="form-control" type="email" id="username"/>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label" for="password">Password</label>
+                    <input class="form-control" type="password" id="password"/>
+                </div>
+
+                <button type="button" class="btn btn-primary text-center" id="login">Login</button>
+            </div>
+        </form>
+
+    </div>
+</div>
+
+<script>
+    homebridge.addEventListener('ready', async () => {
+        let pluginConfig = await homebridge.getPluginConfig();
+        if (pluginConfig[0]) {
+            document.getElementById('username').value = pluginConfig[0].username;
+        }
+
+        document.getElementById('login').addEventListener('click', () => {
+            const payload = {
+                username: document.getElementById('username').value,
+                password: document.getElementById('password').value,
+            }
+            homebridge.request('/login', payload).then(async (config) => {
+                if (config.error) {
+                    homebridge.toast.error(config.error);
+                    document.getElementById('password').value = '';
+                }
+                else {
+                    await homebridge.updatePluginConfig([config]);
+                    homebridge.toast.success(`You have successfully authenticated with Intellifire!`);
+                    await homebridge.savePluginConfig();
+                    homebridge.closeSettings();
+                }
+            });
+        });
+    });
+</script>

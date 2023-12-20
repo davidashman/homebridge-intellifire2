@@ -1,13 +1,13 @@
 import {Service, PlatformAccessory, CharacteristicValue, CharacteristicChange} from 'homebridge';
-import { IntellifirePlatform } from './platform.js';
-import {Session} from './session.js';
-import {Device} from './types.js';
+import {IntellifirePlatform} from './platform.js';
+import {clearTimeout} from 'timers';
 
 export class Fireplace {
   private readonly service: Service;
   private readonly sensor: Service;
   private readonly fan: Service;
   private heightTimer!: NodeJS.Timeout;
+  private pollTimer!: NodeJS.Timeout;
 
   private states = {
     on: false,
@@ -16,18 +16,25 @@ export class Fireplace {
 
   constructor(
     private readonly platform: IntellifirePlatform,
-    private readonly device: Device,
     private readonly accessory: PlatformAccessory,
-    private readonly session: Session,
   ) {
 
-    this.platform.log.info(`Creating fireplace for device: ${JSON.stringify(device)}`);
+    this.platform.log.info(`Creating fireplace for device: ${JSON.stringify(this.device())}`);
+
+    this.platform.api.on('shutdown', () => {
+      if (this.pollTimer) {
+        clearTimeout(this.pollTimer);
+      }
+      if (this.heightTimer) {
+        clearTimeout(this.heightTimer);
+      }
+    });
 
     // set accessory information
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Hearth and Home')
-      .setCharacteristic(this.platform.Characteristic.Model, this.device.brand)
-      .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device.serial);
+      .setCharacteristic(this.platform.Characteristic.Model, this.device().brand)
+      .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device().serial);
 
     this.service = this.accessory.getService(this.platform.Service.Switch) || this.accessory.addService(this.platform.Service.Switch);
     this.service.setCharacteristic(this.platform.Characteristic.Name, 'Power');
@@ -38,7 +45,7 @@ export class Fireplace {
 
     this.sensor = this.accessory.getService(this.platform.Service.ContactSensor) ||
       this.accessory.addService(this.platform.Service.ContactSensor);
-    this.sensor.setCharacteristic(this.platform.Characteristic.Name, this.accessory.displayName);
+    this.sensor.setCharacteristic(this.platform.Characteristic.Name, 'Fireplace Valve');
 
     this.fan = this.accessory.getService(this.platform.Service.Fan) || this.accessory.addService(this.platform.Service.Fan);
     this.fan.setCharacteristic(this.platform.Characteristic.Name, 'Flame Height');
@@ -50,15 +57,20 @@ export class Fireplace {
       })
       .onSet(this.setHeight.bind(this));
 
-    // get initial status
-    this.getInitialStatus();
+    this.platform.cloud.on('connected', () => {
+      this.platform.cloud.status(this.device()).then(this.handleResponse.bind(this));
+    });
+
     this.poll();
   }
 
-  handleCloudResponse(response) {
-    this.platform.log.debug(`Response from Intellifire: ${response.statusText}`);
+  device() {
+    return this.accessory.context.device;
+  }
+
+  handleResponse(response) {
     if (response.ok) {
-      response.json().then((data) => {
+      response.json().then(data => {
         this.platform.log.debug(`Status response: ${JSON.stringify(data)}`);
         this.updateStatus(data.power === '1', Number(data.height));
       });
@@ -67,37 +79,25 @@ export class Fireplace {
     }
   }
 
-  getInitialStatus() {
-    if (this.session.connected) {
-      this.platform.log.debug(`Poll for status on ${this.accessory.displayName}.`);
-      this.session.fetch(`https://iftapi.net/a/${this.device.serial}//apppoll`)
-        .then(this.handleCloudResponse.bind(this));
-    } else {
-      // do local status check
-    }
-  }
-
-  poll(options = {}) {
-    if (this.session.connected) {
-      this.platform.log.debug(`Long poll for status on ${this.accessory.displayName}.`);
-      this.session.fetch(`https://iftapi.net/a/${this.device.serial}//applongpoll`, options)
-        .then((response) => {
-          this.handleCloudResponse(response);
-          setImmediate(() => {
-            this.poll({
-              method: 'GET',
-              headers: {
-                'If-None-Match': response.headers.get('etag'),
-              },
-            });
-          });
+  poll() {
+    if (this.platform.cloud.connected) {
+      this.platform.cloud.poll(this.device())
+        .then(this.handleResponse.bind(this))
+        .catch(err => {
+          this.platform.log.info(err.message);
         })
-        .catch((err) => {
-          this.platform.log.info('Failed to successfully get update from server: ', err.message);
-          setImmediate(this.poll.bind(this));
+        .finally(() => {
+          this.pollTimer = setTimeout(this.poll.bind(this));
         });
     } else {
-      // do local poll
+      this.platform.local.poll(this.device())
+        .then(this.handleResponse.bind(this))
+        .catch(error => {
+          this.platform.log.info(error.message);
+        })
+        .finally(() => {
+          this.pollTimer = setTimeout(this.poll.bind(this), 5000);
+        });
     }
   }
 
@@ -117,26 +117,16 @@ export class Fireplace {
     }
   }
 
-  post(params : URLSearchParams) {
-    this.platform.log.info(`Sending update to fireplace ${this.accessory.displayName}: ${JSON.stringify(this.states)}=>`,
-      params.toString());
-    this.session.fetch(`https://iftapi.net/a/${this.device.serial}//apppost`, {
-      method: 'POST',
-      body: params,
-    })
-      .then((response: Response) => {
-        if (response.ok) {
-          this.platform.log.info(`Fireplace update response: ${response.status}`);
-        } else {
-          this.platform.log.info(`Fireplace ${this.accessory.displayName} failed to update: ${response.statusText}`);
-        }
-      });
+  post(command: string, value: string) {
+    if (this.platform.cloud.connected) {
+      this.platform.cloud.post(this.device(), command, value);
+    } else {
+      this.platform.local.post(this.device(), command, value);
+    }
   }
 
   sendPowerCommand() {
-    const params = new URLSearchParams();
-    params.append('power', (this.states.on ? '1' : '0'));
-    this.post(params);
+    this.post('power', (this.states.on ? '1' : '0'));
   }
 
   setOn(value : CharacteristicValue) {
@@ -153,9 +143,7 @@ export class Fireplace {
   }
 
   sendHeightCommand() {
-    const params = new URLSearchParams();
-    params.append('height', this.states.height.toString());
-    this.post(params);
+    this.post('height', this.states.height.toString());
   }
 
   setHeight(value : CharacteristicValue) {
