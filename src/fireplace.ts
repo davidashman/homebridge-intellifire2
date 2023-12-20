@@ -1,7 +1,5 @@
 import {Service, PlatformAccessory, CharacteristicValue, CharacteristicChange} from 'homebridge';
 import {IntellifirePlatform} from './platform.js';
-import {Session} from './session.js';
-import {Device} from './types.js';
 import {Buffer} from 'node:buffer';
 import {createHash} from 'node:crypto';
 import {clearTimeout} from 'timers';
@@ -185,21 +183,21 @@ export class Fireplace {
                     const resp = createHash('sha256').update(Buffer.concat([apiKeyBuffer, sig])).digest('hex');
 
                     const params = new URLSearchParams();
-                    params.append("command", command);
-                    params.append("value", value);
-                    params.append("user", this.platform.config.userID);
-                    params.append("response", resp);
+                    params.append('command', command);
+                    params.append('value', value);
+                    params.append('user', this.platform.config.userID);
+                    params.append('response', resp);
 
                     fetch(`http://${ip}/post`, {
                       method: 'POST',
-                      body: params
+                      body: params,
                     }).then(response => {
                       if (response.ok) {
                         this.platform.log.info(`Fireplace ${this.accessory.displayName} update response: ${response.status}`);
                       } else {
                         this.platform.log.info(`Fireplace ${this.accessory.displayName} failed to update: ${response.statusText}`);
                       }
-                    })
+                    });
                   });
                 } else {
                   this.platform.log.info(`Fireplace ${this.accessory.displayName} update failed: ${response.statusText}`);

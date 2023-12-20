@@ -19,19 +19,19 @@ export class Discovery {
     this.socket.on('message', this.handleDiscoveryPacket.bind(this));
 
     this.platform.api.on('shutdown', () => {
-      this.platform.log.info("Shutting down discovery.");
+      this.platform.log.info('Shutting down discovery.');
       this.socket.close();
     });
 
     this.socket.bind(55555, () => {
       this.socket.setBroadcast(true);
-      this.platform.log.debug(`Sending UDP discovery packet`);
+      this.platform.log.debug('Sending UDP discovery packet');
       this.socket.send('IFT-search', 3785, '255.255.255.255');
     });
   }
 
-  async handleDiscoveryPacket(msg, _) {
-    this.platform.log.debug(`Received UDP packet for fireplace: ${msg}`);
+  async handleDiscoveryPacket(msg, rinfo) {
+    this.platform.log.debug(`Received UDP packet for fireplace: ${msg} (${rinfo})`);
     const data = JSON.parse(msg) as DiscoveryInfo;
     fetch(`http://${data.ip}/poll`)
       .then((response) => {
@@ -39,7 +39,7 @@ export class Discovery {
           response.json().then((json) => {
             this.platform.log.debug(`Fireplace ${json.serial} is at ip ${data.ip}`);
             this.ipList.set(json.serial, data.ip);
-          })
+          });
         }
       })
       .catch((err) => {

@@ -17,18 +17,18 @@ export class Session extends EventEmitter {
       if (this.timer) {
         clearTimeout(this.timer);
       }
-    })
+    });
   }
 
   cookieFor(name: string) {
     return Cookie.fromObject({
       name: name,
       value: this.platform.config[name],
-      path: "/",
-      domain: "iftapi.net",
+      path: '/',
+      domain: 'iftapi.net',
       subdomains: false,
       secure: false,
-      expiry: null
+      expiry: null,
     });
   }
 
