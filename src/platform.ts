@@ -10,9 +10,7 @@ import {
 
 import {PLATFORM_NAME, PLUGIN_NAME} from './settings.js';
 import {Fireplace} from './fireplace.js';
-import {Cloud} from './cloud.js';
-import {Locations, Location, Device} from './types.js';
-import {Local} from './local.js';
+import {Cloud, Local, Device} from './api.js';
 
 /**
  * HomebridgePlatform
@@ -41,7 +39,7 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
     // in order to ensure they weren't added to homebridge already. This event can also be used
     // to start discovery of new accessories.
     this.api.on('didFinishLaunching', () => {
-      this.cloud.login().catch(error => this.log.error(error.message));
+      this.cloud.connect().catch(error => this.log.error(error.message));
     });
   }
 
@@ -63,35 +61,21 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
    * must not be registered again to prevent 'duplicate UUID' errors.
    */
   async discoverDevices() {
-    this.log.info('Discovering locations...');
-    const locationResponse = await this.cloud.fetch(null, 'enumlocations');
-    if (locationResponse.ok) {
-      const locations: Locations = await locationResponse.json();
-      const location_id = locations.locations[0].location_id;
-
-      this.log.info('Discovering fireplaces...');
-      const fireplaceResponse = await this.cloud.fetch(null, `enumfireplaces?location_id=${location_id}`);
-      if (fireplaceResponse.ok) {
-        const location : Location = await fireplaceResponse.json();
-        this.log.info(`Found ${location.fireplaces.length} fireplaces.`);
-
-        location.fireplaces.forEach((device : Device) => {
-          const uuid = this.api.hap.uuid.generate(device.serial);
-          const existingAccessory = this.accessories.find(accessory => accessory.UUID === uuid);
-          if (existingAccessory) {
-            // Update the context information for the accessory
-            existingAccessory.context.device = device;
-          } else {
-            this.log.info('Adding new accessory:', device.name);
-            const accessory = new this.api.platformAccessory(device.name, uuid);
-            accessory.context.device = device;
-            this.accessories.push(accessory);
-            new Fireplace(this, accessory);
-            this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
-          }
-        });
+    await this.cloud.forEachDevice((device : Device) => {
+      const uuid = this.api.hap.uuid.generate(device.serial);
+      const existingAccessory = this.accessories.find(accessory => accessory.UUID === uuid);
+      if (existingAccessory) {
+        // Update the context information for the accessory
+        existingAccessory.context.device = device;
+      } else {
+        this.log.info('Adding new accessory:', device.name);
+        const accessory = new this.api.platformAccessory(device.name, uuid);
+        accessory.context.device = device;
+        this.accessories.push(accessory);
+        new Fireplace(this, accessory);
+        this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       }
-    }
+    });
   }
 
 }
