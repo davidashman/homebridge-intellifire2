@@ -1,7 +1,7 @@
 {
   "displayName": "Homebridge Intellifire",
   "name": "homebridge-intellifire2",
-  "version": "1.4.18",
+  "version": "1.5.0.beta.1",
   "description": "A short description about what your plugin does.",
   "license": "Apache-2.0",
   "type": "module",
