@@ -1,16 +1,17 @@
 import {
   API,
+  Categories,
+  Characteristic,
   DynamicPlatformPlugin,
   Logger,
   PlatformAccessory,
   PlatformConfig,
   Service,
-  Characteristic,
 } from 'homebridge';
 
 import {PLATFORM_NAME, PLUGIN_NAME} from './settings.js';
 import {Fireplace} from './fireplace.js';
-import {Cloud, Local, Device} from './api.js';
+import {Cloud, Device, Local} from './api.js';
 
 /**
  * HomebridgePlatform
@@ -69,7 +70,7 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
         existingAccessory.context.device = device;
       } else {
         this.log.info('Adding new accessory:', device.name);
-        const accessory = new this.api.platformAccessory(device.name, uuid);
+        const accessory = new this.api.platformAccessory(device.name, uuid, Categories.SWITCH);
         accessory.context.device = device;
         this.accessories.push(accessory);
         new Fireplace(this, accessory);
