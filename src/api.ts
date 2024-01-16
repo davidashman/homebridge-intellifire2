@@ -40,7 +40,6 @@ export class Cloud extends EventEmitter {
   private readonly cookies = new CookieJar();
   public connected = false;
   private timer!: NodeJS.Timeout;
-  private etags = new Map<string, string>();
 
   constructor(
     private readonly platform : IntellifirePlatform,
@@ -77,6 +76,14 @@ export class Cloud extends EventEmitter {
     this.ping();
   }
 
+  onConnected(listener: () => void) {
+    this.on('connected', listener);
+
+    if (this.connected) {
+      listener();
+    }
+  }
+
   ping() {
     this.fetch(null, 'enumlocations')
       .then(response => {
@@ -99,21 +106,16 @@ export class Cloud extends EventEmitter {
     return this.fetch(device, 'apppoll');
   }
 
-  poll(device: Device) {
-    this.platform.log.debug(`Long poll for status on ${device.name}.`);
+  poll(device: Device, lastUpdated: number) {
+    this.platform.log.debug(`Long poll for status on ${device.name} since ${lastUpdated}.`);
     const options = {
       method: 'GET',
+      headers: {'If-None-Match': `${lastUpdated}:0`},
     };
-
-    if (this.etags.has(device.serial)) {
-      options['headers'] = {'If-None-Match': this.etags.get(device.serial)};
-      this.platform.log.debug(`Etag set to ${this.etags.get(device.serial)}`);
-    }
 
     return new Promise((resolve, reject) => {
       this.fetch(device, 'applongpoll', options)
         .then(response => {
-          this.etags.set(device.serial, response.headers.get('etag'));
           resolve(response);
         })
         .catch(error => {
@@ -218,7 +220,11 @@ export class Local {
     }
   }
 
-  poll(device: Device) {
+  poll(device: Device, lastUpdated: number) {
+    return this.fetch(device, 'poll');
+  }
+
+  status(device: Device) {
     return this.fetch(device, 'poll');
   }
 

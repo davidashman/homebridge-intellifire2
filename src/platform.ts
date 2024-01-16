@@ -33,7 +33,7 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
     public readonly api: API,
   ) {
     this.log.debug('Finished initializing platform:', this.config.name);
-    this.cloud.on('connected', this.discoverDevices.bind(this));
+    this.cloud.onConnected(this.discoverDevices.bind(this));
 
     // When this event is fired it means Homebridge has restored all cached accessories from disk.
     // Dynamic Platform plugins should only register new accessories after this event was fired,
@@ -70,7 +70,7 @@ export class IntellifirePlatform implements DynamicPlatformPlugin {
         existingAccessory.context.device = device;
       } else {
         this.log.info('Adding new accessory:', device.name);
-        const accessory = new this.api.platformAccessory(device.name, uuid, Categories.SWITCH);
+        const accessory = new this.api.platformAccessory(device.name, uuid, Categories.LIGHTBULB);
         accessory.context.device = device;
         this.accessories.push(accessory);
         new Fireplace(this, accessory);
