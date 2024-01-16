@@ -220,7 +220,7 @@ export class Local {
     }
   }
 
-  poll(device: Device, lastUpdated: number) {
+  poll(device: Device, lastUpdated: number) { // eslint-disable-line @typescript-eslint/no-unused-vars
     return this.fetch(device, 'poll');
   }
 

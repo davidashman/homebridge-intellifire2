@@ -42,21 +42,24 @@ export class Fireplace {
       .setCharacteristic(this.platform.Characteristic.Model, this.device().brand)
       .setCharacteristic(this.platform.Characteristic.SerialNumber, this.device().serial);
 
-    this.flame = this.accessory.getService('Flame') || this.accessory.addService(this.platform.Service.Lightbulb, 'Flame', 'flame');
+    this.flame = this.accessory.getService('Flame') ||
+      this.accessory.addService(this.platform.Service.Lightbulb, 'Flame', 'flame');
     this.flame.getCharacteristic(this.platform.Characteristic.On)
       .onSet(this.setOn.bind(this))
       .onGet(this.getOn.bind(this))
       .on('change', this.setSensor.bind(this));
     this.flame.getCharacteristic(this.platform.Characteristic.Brightness)
-        .setProps({
-          minStep: 25,
-        })
-        .onSet(this.setHeight.bind(this));
+      .setProps({
+        minStep: 25,
+      })
+      .onSet(this.setHeight.bind(this));
     this.flame.setPrimaryService(true);
 
-    this.sensor = this.accessory.getService('Fireplace Valve') || this.accessory.addService(this.platform.Service.ContactSensor, 'Fireplace Valve');
+    this.sensor = this.accessory.getService('Fireplace Valve') ||
+      this.accessory.addService(this.platform.Service.ContactSensor, 'Fireplace Valve');
 
-    this.fan = this.accessory.getService('Fan Speed') || this.accessory.addService(this.platform.Service.Fan, 'Fan Speed', 'fan');
+    this.fan = this.accessory.getService('Fan Speed') ||
+      this.accessory.addService(this.platform.Service.Fan, 'Fan Speed', 'fan');
     this.fan.getCharacteristic(this.platform.Characteristic.RotationSpeed)
       .setProps({
         minValue: 0,
@@ -65,9 +68,9 @@ export class Fireplace {
       })
       .onSet(this.setFan.bind(this));
 
-    this.lights = this.accessory.getService('Lights') || this.accessory.addService(this.platform.Service.Lightbulb, 'Lights', 'lights');
-    this.lights.getCharacteristic(this.platform.Characteristic.On)
-        .onSet(this.setLights.bind(this));
+    this.lights = this.accessory.getService('Lights') ||
+      this.accessory.addService(this.platform.Service.Lightbulb, 'Lights', 'lights');
+    this.lights.getCharacteristic(this.platform.Characteristic.On).onSet(this.setLights.bind(this));
 
     this.platform.cloud.onConnected(this.status.bind(this));
     this.poll();
@@ -82,10 +85,10 @@ export class Fireplace {
       response.json().then(data => {
         this.platform.log.debug(`Status response: ${JSON.stringify(data)}`);
         this.updateStatus(data.power === '1',
-            Number(data.height) * 25,
-            Number(data.fanspeed),
-            data.light === '1',
-            Number(data.timestamp));
+          Number(data.height) * 25,
+          Number(data.fanspeed),
+          data.light === '1',
+          Number(data.timestamp));
       });
     } else {
       this.platform.log.debug('No updates from the server.');
@@ -102,10 +105,10 @@ export class Fireplace {
 
   status() {
     this.api().status(this.device())
-        .then(this.handleResponse.bind(this))
-        .catch(err => {
-          this.platform.log.info(err.message);
-        })
+      .then(this.handleResponse.bind(this))
+      .catch(err => {
+        this.platform.log.info(err.message);
+      });
   }
 
   poll() {
@@ -169,7 +172,7 @@ export class Fireplace {
   setHeight(value : CharacteristicValue) {
     this.platform.log.debug(`Setting fireplace ${this.device().name} height: ${value}`);
     if (!this.states.ackOn) {
-      this.platform.log.debug("Limiting flame height to 50% until fireplace acknowledges it's on.");
+      this.platform.log.debug('Limiting flame height to 50% until fireplace acknowledges it\'s on.');
       // we cap the height at 2 until we are acknowledged to be on
       value = Math.min(value as number, 50);
     }
@@ -180,7 +183,7 @@ export class Fireplace {
         clearTimeout(this.adjustTimer);
       }
       this.adjustTimer = setTimeout(() => {
-        this.sendHeightCommand(value as number / 25)
+        this.sendHeightCommand(value as number / 25);
       }, 2000);
     }
   }
