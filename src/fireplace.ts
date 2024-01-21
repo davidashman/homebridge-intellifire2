@@ -11,6 +11,7 @@ export class Fireplace {
 
   private states = {
     on: false,
+    ackOn: false,
     height: 2,
   };
 
@@ -40,8 +41,7 @@ export class Fireplace {
     this.service.setCharacteristic(this.platform.Characteristic.Name, 'Power');
     this.service.getCharacteristic(this.platform.Characteristic.On)
       .onSet(this.setOn.bind(this))
-      .onGet(this.getOn.bind(this))
-      .on('change', this.setSensor.bind(this));
+      .onGet(this.getOn.bind(this));
 
     this.sensor = this.accessory.getService(this.platform.Service.ContactSensor) ||
       this.accessory.addService(this.platform.Service.ContactSensor);
@@ -99,19 +99,18 @@ export class Fireplace {
   }
 
   updateStatus(power: boolean, height: number) {
+    if (power !== this.states.ackOn) {
+      this.sensor.getCharacteristic(this.platform.Characteristic.ContactSensorState).updateValue(power);
+    }
+
     this.states.on = power;
+    this.states.ackOn = power;
     this.states.height = this.states.on ? height : 0;
     this.platform.log.info(`Fireplace ${this.accessory.displayName} states set to ${JSON.stringify(this.states)}`);
 
     this.service.getCharacteristic(this.platform.Characteristic.On).updateValue(this.states.on);
     this.fan.getCharacteristic(this.platform.Characteristic.On).updateValue(this.states.on);
     this.fan.getCharacteristic(this.platform.Characteristic.RotationSpeed).updateValue(this.states.height);
-  }
-
-  async setSensor(change : CharacteristicChange) {
-    if (change.newValue !== change.oldValue) {
-      this.sensor.getCharacteristic(this.platform.Characteristic.ContactSensorState).updateValue(change.newValue ? 1 : 0);
-    }
   }
 
   post(command: string, value: string) {
