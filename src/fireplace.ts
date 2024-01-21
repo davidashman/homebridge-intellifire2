@@ -1,4 +1,4 @@
-import {Service, PlatformAccessory, CharacteristicValue, CharacteristicChange} from 'homebridge';
+import {Service, PlatformAccessory, CharacteristicValue} from 'homebridge';
 import {IntellifirePlatform} from './platform.js';
 import {clearTimeout} from 'timers';
 
